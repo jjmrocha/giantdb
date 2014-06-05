@@ -1,0 +1,15 @@
+{application, giantdb, [
+	{description, "Erlang DB"},
+	{vsn, "0.1.0"},
+	{modules, [
+	]},
+	{registered, [
+		giantdb_sup
+	]},
+	{applications, [
+		kernel, 
+		stdlib
+	]},
+	{mod, {giantdb_app, []}},
+	{env, []}
+]}.
