@@ -16,7 +16,7 @@
 
 -define(DEFAULT_MASTER_DIR, default_master_dir).
 
--define(DB_CONFIG_DB_PARAM, db).
+-define(DB_CONFIG_CONFIG_PARAM, config).
 -define(DB_CONFIG_BUCKETS_PARAM, buckets).
 
--record(db_info, {master_dir, db_name, db_dir, config_file, db_config}).
+-record(db_info, {db_dir, config_file, db_config}).

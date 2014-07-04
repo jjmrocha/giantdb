@@ -1,6 +1,6 @@
 {application, giantdb, [
 	{description, "Erlang DB"},
-	{vsn, "0.1.1"},
+	{vsn, "0.2.0"},
 	{modules, [
 	]},
 	{registered, [
@@ -12,6 +12,6 @@
 	]},
 	{mod, {giantdb_app, []}},
 	{env, [
-		{default_master_dir, "./data"}
+		{giantdb_dir, "./giantdb"}
 	]}
 ]}.

@@ -18,6 +18,12 @@
 
 -include("giantdb.hrl").
 
+-define(SERVER, {local, ?MODULE}).
+
+-define(GIANTDB_TABLE, giantdb_table).
+
+-define(TABLE_RECORD(B, R), {B, R}).
+
 -behaviour(gen_server).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -25,140 +31,91 @@
 %% ====================================================================
 %% API functions
 %% ====================================================================
--export([start_link/1]).
+-export([start_link/0]).
 
--export([open/1, close/1]).
+-export([create_bucket/1, drop_bucket/1, list_buckets/0]).
 
--export([create_bucket/2, drop_bucket/2, list_buckets/1, get_bucket/2]).
-
--export([get/2, get/3, put/3, put/4, delete/2, delete/3]).
+-export([get/2, put/3, delete/2]).
 
 % Internal
-start_link(DBName) ->
-	gen_server:start_link(?MODULE, [DBName], []).
-
-% DB Management
-
--spec open(DBName :: string()) -> {ok, pid()} | {error, term()}.
-open(DBName) ->
-	giantdb_sup:start_db_server(DBName).
-
--spec close(DBPid :: pid()) -> ok.
-close(DBPid) ->
-	gen_server:cast(DBPid, {close_db}).
+start_link() ->
+	gen_server:start_link(?SERVER, ?MODULE, [], []).
 
 % Bucket Management
 
--spec create_bucket(DBPid :: pid(), Bucket :: string()) -> ok | {error, term()}.
-create_bucket(DBPid, Bucket) ->
-	gen_server:call(DBPid, {create_bucket, Bucket}).
+-spec create_bucket(Bucket :: atom()) -> ok | {error, term()}.
+create_bucket(Bucket) ->
+	gen_server:call(?MODULE, {create_bucket, Bucket}).
 
--spec drop_bucket(DBPid :: pid(), Bucket :: string()) -> ok | {error, term()}.
-drop_bucket(DBPid, Bucket) ->
-	gen_server:call(DBPid, {drop_bucket, Bucket}).
+-spec drop_bucket(Bucket :: atom()) -> ok | {error, term()}.
+drop_bucket(Bucket) ->
+	gen_server:call(?MODULE, {drop_bucket, Bucket}).
 
--spec list_buckets(DBPid :: pid()) -> {ok, list()} | {error, term()}.
-list_buckets(DBPid) ->
-	gen_server:call(DBPid, {list_buckets}).
-
--spec get_bucket(DBPid :: pid(), Bucket :: string()) -> {ok, binary()} | {error, term()}.
-get_bucket(DBPid, Bucket) ->
-	gen_server:call(DBPid, {get_bucket, Bucket}).
+-spec list_buckets() -> {ok, list()} | {error, term()}.
+list_buckets() ->
+	gen_server:call(?MODULE, {list_buckets}).
 
 % Data Management
 
--spec get(BRef :: binary(), Key :: term()) -> {ok, term()} | not_found | {error, term()}.
-get(BRef, Key) ->
-	gdb_bucket_util:get(BRef, Key).
-
--spec get(DBPid :: pid(), Bucket :: string(), Key :: term()) -> {ok, term()} | not_found | {error, term()}.
-get(DBPid, Bucket, Key) ->
-	case get_bucket(DBPid, Bucket) of
-		{ok, BRef} -> get(BRef, Key);
-		Error -> Error
+-spec get(Bucket :: atom(), Key :: term()) -> {ok, term()} | not_found | {error, term()}.
+get(Bucket, Key) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BRef -> gdb_bucket_util:get(BRef, Key)
 	end.
 
--spec put(BRef :: binary(), Key :: term(), Value :: term()) -> ok | {error, term()}.
-put(BRef, Key, Value) ->
-	gdb_bucket_util:put(BRef, Key, Value).
-
--spec put(DBPid :: pid(), Bucket :: string(), Key :: term(), Value :: term()) -> ok | {error, term()}.
-put(DBPid, Bucket, Key, Value) ->
-	case get_bucket(DBPid, Bucket) of
-		{ok, BRef} -> put(BRef, Key, Value);
-		Error -> Error
+-spec put(Bucket :: atom(), Key :: term(), Value :: term()) -> ok | {error, term()}.
+put(Bucket, Key, Value) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BRef -> gdb_bucket_util:put(BRef, Key, Value)
 	end.
 
--spec delete(BRef :: binary(), Key :: term()) -> ok | {error, term()}.
-delete(BRef, Key) ->
-	gdb_bucket_util:delete(BRef, Key).
-
--spec delete(DBPid :: pid(), Bucket :: string(), Key :: term()) -> ok | {error, term()}.
-delete(DBPid, Bucket, Key) ->
-	case get_bucket(DBPid, Bucket) of
-		{ok, BRef} -> delete(BRef, Key);
-		Error -> Error
-	end.
+-spec delete(Bucket :: atom(), Key :: term()) -> ok | {error, term()}.
+delete(Bucket, Key) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BRef -> gdb_bucket_util:delete(BRef, Key)
+	end	.
 
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
--record(state, {db_name, db_info, buckets}).
+-record(state, {db_info}).
 
 %% init
-init([DBName]) ->
-	{ok, MasterDir} = application:get_env(giantdb, default_master_dir),
-	case gdb_db_util:exists_db(DBName, MasterDir) of
+init([]) ->
+	process_flag(trap_exit, true),	
+	{ok, DBDir} = application:get_env(giantdb, giantdb_dir),
+	case gdb_db_util:exists_db(DBDir) of
 		true -> 
-			case gdb_db_util:open_db(DBName, MasterDir) of
+			case gdb_db_util:open_db(DBDir) of
 				{ok, DBInfo} -> 
-					error_logger:info_msg("~p: Database ~s was open by process ~p\n", [?MODULE, DBName, self()]),
+					error_logger:info_msg("~p: Database ~s was opened by process ~p\n", [?MODULE, DBDir, self()]),
+					create_table(),
 					{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
-					Buckets = open_buckets(BucketList),
-					{ok, #state{db_name=DBName, db_info=DBInfo, buckets=Buckets}};
+					open_buckets(BucketList),
+					{ok, #state{db_info=DBInfo}};
 				{error, Reason} ->
-					error_logger:error_msg("~p: Error opening database ~s: ~p\n", [?MODULE, DBName, Reason]),
+					error_logger:error_msg("~p: Error opening database ~s: ~p\n", [?MODULE, DBDir, Reason]),
 					{stop, Reason}
 			end;
 		false -> 
-			case gdb_db_util:create_db(DBName, MasterDir) of
+			case gdb_db_util:create_db(DBDir) of
 				{ok, DBInfo} -> 
-					error_logger:info_msg("~p: Database ~s was created by process ~p\n", [?MODULE, DBName, self()]),
-					{ok, #state{db_name=DBName, db_info=DBInfo, buckets=dict:new()}};
+					error_logger:info_msg("~p: Database ~s was created by process ~p\n", [?MODULE, DBDir, self()]),
+					create_table(),
+					{ok, #state{db_info=DBInfo}};
 				{error, Reason} ->
-					error_logger:error_msg("~p: Error creating database ~s: ~p\n", [?MODULE, DBName, Reason]),
+					error_logger:error_msg("~p: Error creating database ~s: ~p\n", [?MODULE, DBDir, Reason]),
 					{stop, Reason}
 			end;			
 		{error, Reason} ->
-			error_logger:error_msg("~p: Error opening database ~s: ~p\n", [?MODULE, DBName, Reason]),
+			error_logger:error_msg("~p: Error opening database ~s: ~p\n", [?MODULE, DBDir, Reason]),
 			{stop, Reason}
 	end.
 
 %% handle_call
-
-handle_call({get_bucket, Bucket}, _From, State=#state{db_info=DBInfo, buckets=Buckets}) ->
-	case dict:find(Bucket, Buckets) of
-		{ok, BRef} ->
-			Reply = {ok, BRef},
-			{reply, Reply, State};
-		false ->
-			case find_bucket(Bucket, DBInfo) of
-				false -> 
-					Reply = {error, bucket_not_exists},
-					{reply, Reply, State};		
-				{_, BucketDirName, BucketConfig} ->
-					case gdb_bucket_util:open_bucket(BucketDirName, BucketConfig) of
-						{ok, BRef} -> 
-							Buckets1 = dict:store(Bucket, BRef, Buckets),
-							Reply = {ok, BRef},
-							{reply, Reply, State#state{buckets=Buckets1}};
-						{error, Reason} ->
-							error_logger:error_msg("~p: Error opening bucket ~s: ~p\n", [?MODULE, Bucket, Reason]),
-							Reply = {error, Reason},
-							{reply, Reply, State}
-					end					
-			end
-	end;
 
 handle_call({list_buckets}, _From, State=#state{db_info=DBInfo}) ->
 	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
@@ -168,46 +125,47 @@ handle_call({list_buckets}, _From, State=#state{db_info=DBInfo}) ->
 	Reply = {ok, List},
 	{reply, Reply, State};
 
-handle_call({create_bucket, Bucket}, _From, State=#state{db_info=DBInfo, buckets=Buckets}) ->
-	{Reply, DBInfo2, Buckets2} = case exists(Bucket, DBInfo) of
+handle_call({create_bucket, Bucket}, _From, State=#state{db_info=DBInfo}) ->
+	{Reply, DBInfo2} = case exists(Bucket, DBInfo) of
 		true -> 
 			Resp = {error, duplicated},
-			{Resp, DBInfo, Buckets};
+			{Resp, DBInfo};
 		false ->
 			case gdb_db_util:add_bucket(DBInfo, Bucket) of
 				{ok, BRef, DBInfo1} ->
-					Buckets1 = dict:store(Bucket, BRef, Buckets),
-					{ok, DBInfo1, Buckets1};
+					ets:insert(?GIANTDB_TABLE, ?TABLE_RECORD(Bucket, BRef)),
+					{ok, DBInfo1};
 				Error ->
-					{Error, DBInfo, Buckets}
+					{Error, DBInfo}
 			end
 	end,
-	{reply, Reply, State#state{db_info=DBInfo2, buckets=Buckets2}};
+	{reply, Reply, State#state{db_info=DBInfo2}};
 
-handle_call({drop_bucket, Bucket}, _From, State=#state{db_info=DBInfo, buckets=Buckets}) ->
-	{Reply, DBInfo2, Buckets2} = case exists(Bucket, DBInfo) of
+handle_call({drop_bucket, Bucket}, _From, State=#state{db_info=DBInfo}) ->
+	{Reply, DBInfo2} = case exists(Bucket, DBInfo) of
 		false -> 
 			Resp = {error, bucket_not_exists},
-			{Resp, DBInfo, Buckets};
+			{Resp, DBInfo};
 		true ->
-			Buckets1 = case dict:find(Bucket, Buckets) of
-				false -> Buckets;
-				{ok, BRef} ->
+			case find_bucket(Bucket) of
+				no_bucket -> ok;
+				BRef ->
 					gdb_bucket_util:close_bucket(BRef),
-					dict:erase(Bucket, Buckets)
+					ets:delete(?GIANTDB_TABLE, Bucket)
 			end,
 			case gdb_db_util:delete_bucket(DBInfo, Bucket) of
 				{ok, DBInfo1} ->
-					{ok, DBInfo1, Buckets1};
+					{ok, DBInfo1};
 				Error ->
-					{Error, DBInfo, Buckets1}
+					{Error, DBInfo}
 			end
 	end,
-	{reply, Reply, State#state{db_info=DBInfo2, buckets=Buckets2}}.
+	{reply, Reply, State#state{db_info=DBInfo2}}.
 
 %% handle_cast
-handle_cast({close_db}, State) ->
-	{stop, normal, State}.
+handle_cast(Msg, State) ->
+	error_logger:info_msg("~p: handle_cast(~p, ~p)\n", [?MODULE, Msg, State]),
+	{noreply, State}.
 
 %% handle_info
 handle_info(Info, State) ->
@@ -215,9 +173,9 @@ handle_info(Info, State) ->
 	{noreply, State}.
 
 %% terminate
-terminate(_Reason, #state{db_name=DBName, buckets=Buckets}) ->
-	close_buckets(Buckets),
-	error_logger:info_msg("~p: Database ~s was closed by process ~p\n", [?MODULE, DBName, self()]),
+terminate(_Reason, _State) ->
+	close_buckets(),
+	drop_table(),
 	ok.
 
 %% code_change
@@ -228,18 +186,24 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %% ====================================================================
 
-open_buckets(BucketList) ->
-	lists:foldl(fun({Bucket, BucketDirName, BucketConfig}, Dict) ->
-				case gdb_bucket_util:open_bucket(BucketDirName, BucketConfig) of
-					{ok, BRef} -> dict:store(Bucket, BRef, Dict);
-					{error, Reason} ->
-						error_logger:error_msg("~p: Error opening bucket ~s: ~p\n", [?MODULE, Bucket, Reason]),
-						Dict
-				end
-		end, dict:new(), BucketList).
+create_table() ->
+	Options = [set, public, named_table, {read_concurrency, true}],
+	ets:new(?GIANTDB_TABLE, Options).
 
-close_buckets(Buckets) ->
-	List = dict:to_list(Buckets),
+drop_table() ->
+	ets:delete(?GIANTDB_TABLE).
+
+open_buckets(BucketList) ->
+	lists:foreach(fun({Bucket, BucketDirName, BucketConfig}) ->
+				case gdb_bucket_util:open_bucket(BucketDirName, BucketConfig) of
+					{ok, BRef} -> ets:insert(?GIANTDB_TABLE, ?TABLE_RECORD(Bucket, BRef));
+					{error, Reason} ->
+						error_logger:error_msg("~p: Error opening bucket ~s: ~p\n", [?MODULE, Bucket, Reason])
+				end
+		end, BucketList).
+
+close_buckets() ->
+	List = ets:tab2list(?GIANTDB_TABLE),
 	lists:foreach(fun({_, BRef}) ->
 				gdb_bucket_util:close_bucket(BRef)
 		end, List).
@@ -251,6 +215,8 @@ exists(Bucket, #db_info{db_config=Config}) ->
 		_ -> true
 	end.
 
-find_bucket(Bucket, #db_info{db_config=Config}) ->
-	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, Config),
-	lists:keyfind(Bucket, 1, BucketList).
+find_bucket(Bucket) ->
+	case ets:lookup(?GIANTDB_TABLE, Bucket) of
+		[] -> no_bucket;
+		[{_, BRef}] -> BRef
+	end.

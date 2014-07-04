@@ -34,17 +34,11 @@
 %% ====================================================================
 %% API functions
 %% ====================================================================
--export([close_bucket/1, 
-	open_bucket/2,
-	delete_bucket/1]).
+-export([close_bucket/1, open_bucket/2,	delete_bucket/1]).
 
--export([get/2,
-	put/3,
-	delete/2]).
+-export([get/2,	put/3, delete/2]).
 
--export([batch_exec/2,
-	batch_put/3,
-	batch_delete/2]).
+-export([batch_exec/2, batch_put/3,	batch_delete/2]).
 
 -spec open_bucket(BucketPath :: string(), Config :: list()) -> {ok, BRef :: binary()} | {error, Reason :: term()}.
 open_bucket(BucketPath, _Config) ->

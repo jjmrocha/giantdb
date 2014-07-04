@@ -19,63 +19,51 @@
 -include("giantdb.hrl").
 
 -define(DB_CONFIG_FILENAME, "giantdb.conf").
--define(DB_CONFIG_DATA(DBName), [
-		{?DB_CONFIG_DB_PARAM, DBName}, 
+-define(DB_CONFIG_DATA, [
+		{?DB_CONFIG_CONFIG_PARAM, []}, 
 		{?DB_CONFIG_BUCKETS_PARAM, []}
 		]).
 
 %% ====================================================================
 %% API functions
 %% ====================================================================
--export([exists_db/2,
-	create_db/2,
-	open_db/2]).
+-export([exists_db/1, create_db/1, open_db/1]).
 
--export([add_bucket/2,
-	add_bucket/3,
-	delete_bucket/2]).
+-export([add_bucket/2, add_bucket/3, delete_bucket/2]).
 
--spec exists_db(DBName :: string(), MasterDir :: string()) -> boolean() | {error, Reason :: any()}.
-exists_db(DBName, MasterDir) ->
-	DBDir = db_dir(DBName, MasterDir),
+-spec exists_db(DBDir :: string()) -> boolean() | {error, Reason :: any()}.
+exists_db(DBDir) ->
 	exists(DBDir).
 
--spec create_db(DBName :: string(), MasterDir :: string()) -> {ok, DBInfo :: #db_info{}} | {error, Reason :: any()}.
-create_db(DBName, MasterDir) ->
-	case exists(MasterDir) of
-		true -> 
-			DBDir = db_dir(DBName, MasterDir),
+-spec create_db(DBDir :: string()) -> {ok, DBInfo :: #db_info{}} | {error, Reason :: any()}.
+create_db(DBDir) ->
+	case exists(DBDir) of
+		true -> {error, duplicated_db};
+		false -> 
 			case make_dir(DBDir) of
 				ok ->
 					ConfigFile = get_db_config_name(DBDir),
-					DBConfig = ?DB_CONFIG_DATA(DBName),
-					case store_db_config(ConfigFile, DBConfig) of
+					case store_db_config(ConfigFile, ?DB_CONFIG_DATA) of
 						ok ->
-							DBInfo = #db_info{master_dir=MasterDir, 
-									db_name=DBName, 
-									db_dir=DBDir, 
+							DBInfo = #db_info{db_dir=DBDir, 
 									config_file=ConfigFile, 
-									db_config=DBConfig},							
+									db_config=?DB_CONFIG_DATA},							
 							{ok, DBInfo};
 						Error -> Error
 					end;
 				Error -> Error
 			end;
-		false -> {error, no_master_dir};
 		Error -> Error
 	end.
 
--spec open_db(DBName :: string(), MasterDir :: string()) -> {ok, DBInfo :: #db_info{}} | {error, Reason :: any()}.
-open_db(DBName, MasterDir) ->
-	DBDir = db_dir(DBName, MasterDir),
+-spec open_db(DBDir :: string()) -> {ok, DBInfo :: #db_info{}} | {error, Reason :: any()}.
+open_db(DBDir) ->
 	case exists(DBDir) of
 		true -> 
 			ConfigFile = get_db_config_name(DBDir),
 			case read_db_config(ConfigFile) of
 				{ok, DBConfig} ->
-					DBInfo = #db_info{master_dir=MasterDir, 
-							db_name=DBName, 
-							db_dir=DBDir, 
+					DBInfo = #db_info{db_dir=DBDir, 
 							config_file=ConfigFile, 
 							db_config=DBConfig},							
 					{ok, DBInfo};		
@@ -123,9 +111,6 @@ delete_bucket(DBInfo, Bucket) ->
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
-
-db_dir(DBName, MasterDir) ->
-	filename:join(MasterDir, DBName).
 
 make_dir(Dir) ->
 	case exists(Dir) of

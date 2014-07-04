@@ -18,22 +18,13 @@
 
 -behaviour(supervisor).
 
--define(SERVER, {local, ?MODULE}).
-
 -export([init/1]).
 
 -export([start_link/0]).
--export([start_db_server/1]).
 
 start_link() ->
-	supervisor:start_link(?SERVER, ?MODULE, []).
+	supervisor:start_link(?MODULE, []).
 
-start_db_server(DBName) ->
-	supervisor:start_child(?MODULE, [DBName]).
-
-init([]) ->
-	process_flag(trap_exit, true),
-	error_logger:info_msg("~p [~p] Starting...\n", [?MODULE, self()]),
-	
-	DB = {giantdb, {giantdb, start_link, []}, temporary, 2000, worker, [giantdb]},
-	{ok,{{simple_one_for_one, 10, 60}, [DB]}}.
+init([]) ->	
+	DB = {giantdb, {giantdb, start_link, []}, permanent, 2000, worker, [giantdb]},
+	{ok,{{one_for_one, 10, 60}, [DB]}}.
