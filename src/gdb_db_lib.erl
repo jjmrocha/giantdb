@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%
 
--module(gdb_db_util).
+-module(gdb_db_lib).
 
 -include("giantdb.hrl").
 
@@ -29,7 +29,9 @@
 %% ====================================================================
 -export([exists_db/1, create_db/1, open_db/1]).
 
--export([add_bucket/2, add_bucket/3, delete_bucket/2]).
+-export([add_bucket/2, delete_bucket/2]).
+
+-export([add_index/5]).
 
 -spec exists_db(DBDir :: string()) -> boolean() | {error, Reason :: any()}.
 exists_db(DBDir) ->
@@ -74,20 +76,16 @@ open_db(DBDir) ->
 	end.
 
 -spec add_bucket(DBInfo :: #db_info{}, Bucket :: string()) -> 
-	{ok, BRef :: term(), DBInfo :: #db_info{}} | {error, Reason :: any()}.
-add_bucket(DBInfo, Bucket) -> add_bucket(DBInfo, Bucket, []).
-
--spec add_bucket(DBInfo :: #db_info{}, Bucket :: string(), BucketConfig :: list()) -> 
-	{ok, BRef :: term(), DBInfo :: #db_info{}} | {error, Reason :: any()}.
-add_bucket(DBInfo, Bucket, BucketConfig) ->
+	{ok, BInfo :: #bucket_info{}, DBInfo :: #db_info{}} | {error, Reason :: any()}.
+add_bucket(DBInfo, Bucket) -> 
 	BucketDirName = get_bucket_name(DBInfo#db_info.db_dir, Bucket),
-	case gdb_bucket_util:open_bucket(BucketDirName, BucketConfig) of
-		{ok, BRef} ->
+	case gdb_bucket_lib:open_bucket(Bucket, BucketDirName, []) of
+		{ok, BInfo} ->
 			{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
-			BucketList1 = lists:keystore(Bucket, 1, BucketList, {Bucket, BucketDirName, BucketConfig}),
+			BucketList1 = lists:keystore(Bucket, 1, BucketList, ?BUCKET_ROW(Bucket, BucketDirName, [])),
 			DBConfig1 = lists:keystore(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config, {?DB_CONFIG_BUCKETS_PARAM, BucketList1}),			
 			store_db_config(DBInfo#db_info.config_file, DBConfig1),
-			{ok, BRef, DBInfo#db_info{db_config=DBConfig1}};
+			{ok, BInfo, DBInfo#db_info{db_config=DBConfig1}};
 		Error -> Error
 	end.
 
@@ -96,14 +94,37 @@ add_bucket(DBInfo, Bucket, BucketConfig) ->
 delete_bucket(DBInfo, Bucket) ->
 	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
 	case lists:keyfind(Bucket, 1, BucketList) of
-		{_, BucketDirName, _} ->
+		?BUCKET_ROW(_, BucketDirName, _) ->
 			BucketList1 = lists:keydelete(Bucket, 1, BucketList),
-			case gdb_bucket_util:delete_bucket(BucketDirName) of
+			case gdb_bucket_lib:delete_bucket(BucketDirName) of
 				ok ->
 					DBConfig1 = lists:keystore(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config, {?DB_CONFIG_BUCKETS_PARAM, BucketList1}),
 					store_db_config(DBInfo#db_info.config_file, DBConfig1),
 					{ok, DBInfo#db_info{db_config=DBConfig1}};
 				Error -> Error
+			end;
+		false -> {error, bucket_not_found}
+	end.
+
+-spec add_index(DBInfo :: #db_info{}, BInfo :: #bucket_info{}, Index :: atom(), Module :: atom(), Function :: atom()) -> 
+	{ok, BInfo1 :: #bucket_info{}, DBInfo1 :: #db_info{}} | {error, Reason :: any()}.
+add_index(DBInfo, BInfo, Index, Module, Function) ->
+	Bucket = BInfo#bucket_info.bucket,
+	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
+	case lists:keyfind(Bucket, 1, BucketList) of
+		?BUCKET_ROW(_, BucketDirName, BucketConfig) ->
+			case lists:keyfind(Index, 1, BucketConfig) of
+				false ->
+					BucketConfig1 = lists:keystore(Index, 1, BucketConfig, ?INDEX_ROW(Index, Module, Function)),
+					BucketList1 = lists:keystore(Bucket, 1, BucketList, ?BUCKET_ROW(Bucket, BucketDirName, BucketConfig1)),
+					DBConfig1 = lists:keystore(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config, {?DB_CONFIG_BUCKETS_PARAM, BucketList1}),
+					case gdb_bucket_lib:run_index(BInfo, Index, Module, Function) of
+						{ok, BInfo1} ->
+							store_db_config(DBInfo#db_info.config_file, DBConfig1),
+							{ok, BInfo1, DBInfo#db_info{db_config=DBConfig1}};		
+						Error -> Error
+					end;
+				_ -> {error, duplicated}
 			end;
 		false -> {error, bucket_not_found}
 	end.

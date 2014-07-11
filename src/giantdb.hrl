@@ -14,9 +14,14 @@
 %% limitations under the License.
 %%
 
--define(DEFAULT_MASTER_DIR, default_master_dir).
-
 -define(DB_CONFIG_CONFIG_PARAM, config).
 -define(DB_CONFIG_BUCKETS_PARAM, buckets).
 
 -record(db_info, {db_dir, config_file, db_config}).
+
+-record(index_info, {index, module, function}).
+
+-record(bucket_info, {bucket, ref, indexes=[]}).
+
+-define(BUCKET_ROW(Bucket, BucketDirName, BucketConfig), {Bucket, BucketDirName, BucketConfig}).
+-define(INDEX_ROW(Index, Module, Function), {Index, Module, Function}).
