@@ -64,7 +64,8 @@ list_buckets() ->
 ### Drop bucket
 
 ```erlang
-drop_bucket(Bucket :: atom()) -> ok | {error, Reason :: term()}.
+drop_bucket(Bucket :: atom()) -> 
+	ok | {error, Reason :: term()}.
 ```
 
 Parameters:
@@ -237,7 +238,7 @@ fun(Key, _Value) when is_integer(Key) -> Key >= 10 andalso Key =< 20;
 
 ### Using indexes
 
-** List all index keys **
+**List all index keys**
 
 ```erlang
 index(Bucket :: atom(), Index :: atom()) -> 
@@ -248,7 +249,7 @@ Parameters:
 * Bucket - **Bucket name**
 * Index - **Index name**
 
-** List all Key/Values pairs associated with one index value **
+**List all Key/Values pairs associated with one index value**
 
 ```erlang
 index(Bucket :: atom(), Index :: atom(), Key :: term()) -> 
