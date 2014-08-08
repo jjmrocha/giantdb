@@ -238,7 +238,7 @@ fun(Key, _Value) when is_integer(Key) -> Key >= 10 andalso Key =< 20;
 
 ### Using indexes
 
-**List all index keys**
+**List all index values**
 
 ```erlang
 index(Bucket :: atom(), Index :: atom()) -> 
@@ -249,11 +249,11 @@ Parameters:
 * Bucket - **Bucket name**
 * Index - **Index name**
 
-**List all Key/Values pairs associated with one index value**
+**List all Keys associated with one index value**
 
 ```erlang
-index(Bucket :: atom(), Index :: atom(), Key :: term()) -> 
-	{ok, IndexValueList :: list()} | {error, Reason :: term()}.
+index(Bucket :: atom(), Index :: atom(), IndexValue :: term()) -> 
+	{ok, KeyList :: list()} | {error, Reason :: term()}.
 ```
 
 Parameters:
