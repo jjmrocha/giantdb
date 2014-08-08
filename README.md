@@ -1,4 +1,4 @@
-giantdb
+GiantDB
 =======
 *GiantDB is a basic NoSQL (Key/Value type) database for Erlang clusters*
 
@@ -33,7 +33,7 @@ Set the property "giantdb_dir" on your config file to define the localization of
 Starting giantDB
 ----------------
 
-Giant DB database is created or opened automatically when the application starts.
+GiantDB database is created or opened automatically when the application starts.
 
 
 ```erlang
@@ -158,7 +158,7 @@ Parameters:
 * Module - **Erlang module name where is the "Function"**
 * Function - **Name of the function that generates the index values associated with the Key/Value pair**
 
-*The function receive two parameters (Key and Value) and return a list of zero or more values.*
+*The function receives two parameters (Key and Value) and return a list of zero or more values.*
 
 Function example:
 ```erlang
