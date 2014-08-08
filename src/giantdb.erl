@@ -33,9 +33,11 @@
 
 -export([create_bucket/1, drop_bucket/1, list_buckets/0]).
 
--export([create_index/4]).
+-export([create_index/4, drop_index/2, list_indexes/1]).
 
 -export([get/2, put/3, delete/2]).
+
+-export([index/2, index/3, find/3]).
 
 -export([filter/2, foreach/2]).
 
@@ -63,6 +65,14 @@ list_buckets() ->
 create_index(Bucket, Index, Module, Function) -> 
 	gen_server:call(?MODULE, {create_index, Bucket, Index, Module, Function}).
 
+-spec drop_index(Bucket :: atom(), Index :: atom()) -> ok | {error, term()}.
+drop_index(Bucket, Index) ->
+	gen_server:call(?MODULE, {drop_index, Bucket, Index}).
+
+-spec list_indexes(Bucket :: atom()) -> {ok, list()} | {error, term()}.
+list_indexes(Bucket) ->
+	gen_server:call(?MODULE, {list_indexes, Bucket}).
+
 % Data Management
 
 -spec get(Bucket :: atom(), Key :: term()) -> {ok, term()} | not_found | {error, term()}.
@@ -86,10 +96,33 @@ delete(Bucket, Key) ->
 		BInfo -> gdb_bucket_lib:delete(BInfo, Key)
 	end.
 
+% Index usage
+
+-spec index(Bucket :: atom(), Index :: atom()) -> {ok, list()} | {error, term()}.
+index(Bucket, Index) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BInfo -> gdb_bucket_lib:index(BInfo, Index)
+	end.	
+
+-spec index(Bucket :: atom(), Index :: atom(), Key :: term()) -> {ok, list()} | {error, term()}.
+index(Bucket, Index, Key) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BInfo -> gdb_bucket_lib:index_key(BInfo, Index, Key)
+	end.	
+
+-spec find(Bucket :: atom(), Index :: atom(), Key :: term()) -> {ok, list()} | {error, term()}.
+find(Bucket, Index, Key) ->
+	case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BInfo -> gdb_bucket_lib:index_get(BInfo, Index, Key)
+	end.
+
 % Querys
 
--spec filter(Bucket :: atom(), Fun :: FilterFun) -> list() | {error, term()} 
-		  when FilterFun :: fun(({Key :: term(), Value :: term()}) -> boolean()).
+-spec filter(Bucket :: atom(), Fun :: FilterFun) -> {ok, list()} | {error, term()} 
+	when FilterFun :: fun((Key :: term(), Value :: term()) -> boolean()).
 filter(Bucket, Fun) ->
 	case find_bucket(Bucket) of
 		no_bucket -> {error, no_bucket};
@@ -97,7 +130,7 @@ filter(Bucket, Fun) ->
 	end	.	
 
 -spec foreach(Bucket :: atom(), Fun :: AllFun) -> ok | {error, term()} 
-		  when AllFun :: fun(({Key :: term(), Value :: term()}) -> any()).
+	when AllFun :: fun((Key :: term(), Value :: term()) -> any()).
 foreach(Bucket, Fun) ->
 	case find_bucket(Bucket) of
 		no_bucket -> {error, no_bucket};
@@ -151,62 +184,74 @@ handle_call({list_buckets}, _From, State=#state{db_info=DBInfo}) ->
 	Reply = {ok, List},
 	{reply, Reply, State};
 
+handle_call({list_indexes, Bucket}, _From, State) ->
+	Reply = case find_bucket(Bucket) of
+		no_bucket -> {error, no_bucket};
+		BInfo -> 
+			List = lists:map(fun(#index_info{index=Index, module=Module, function=Function}) -> 
+							{Index, Module, Function} 
+					end, BInfo#bucket_info.indexes),
+			{ok, List}
+	end,	
+	{reply, Reply, State};	
+
 handle_call({create_index, Bucket, Index, Module, Function}, _From, State=#state{db_info=DBInfo}) ->
-	{Reply, DBInfo2} = case exists(Bucket, DBInfo) of
-		true -> 
-			case find_bucket(Bucket) of
-				no_bucket -> 
-					Resp = {error, no_bucket},
-					{Resp, DBInfo};
-				BInfo -> 
-					case gdb_db_lib:add_index(DBInfo, BInfo, Index, Module, Function) of
-						{ok, BInfo1, DBInfo1} ->
-							ets:insert(?GIANTDB_TABLE, BInfo1),
-							{ok, DBInfo1};
-						Error ->
-							{Error, DBInfo}
-					end
-			end;			
-		false ->
-			Resp = {error, bucket_not_exists},
-			{Resp, DBInfo}
+	{Reply, DBInfo2} = case find_bucket(Bucket) of
+		no_bucket -> 
+			Resp = {error, no_bucket},
+			{Resp, DBInfo};
+		BInfo -> 
+			case gdb_db_lib:add_index(DBInfo, BInfo, Index, Module, Function) of
+				{ok, BInfo1, DBInfo1} ->
+					ets:insert(?GIANTDB_TABLE, BInfo1),
+					{ok, DBInfo1};
+				Error -> {Error, DBInfo}
+			end
 	end,	
 	{reply, Reply, State#state{db_info=DBInfo2}};
 
-handle_call({create_bucket, Bucket}, _From, State=#state{db_info=DBInfo}) ->
-	{Reply, DBInfo2} = case exists(Bucket, DBInfo) of
-		true -> 
-			Resp = {error, duplicated},
+handle_call({drop_index, Bucket, Index}, _From, State=#state{db_info=DBInfo}) ->
+	{Reply, DBInfo2} = case find_bucket(Bucket) of
+		no_bucket -> 
+			Resp = {error, no_bucket},
 			{Resp, DBInfo};
-		false ->
+		BInfo -> 
+			case gdb_db_lib:remove_index(DBInfo, BInfo, Index) of
+				{ok, BInfo1, DBInfo1} ->
+					ets:insert(?GIANTDB_TABLE, BInfo1),
+					{ok, DBInfo1};
+				Error -> {Error, DBInfo}
+			end		
+	end,	
+	{reply, Reply, State#state{db_info=DBInfo2}};  
+
+handle_call({create_bucket, Bucket}, _From, State=#state{db_info=DBInfo}) ->
+	{Reply, DBInfo2} = case find_bucket(Bucket) of
+		no_bucket ->
 			case gdb_db_lib:add_bucket(DBInfo, Bucket) of
 				{ok, BInfo, DBInfo1} ->
 					ets:insert(?GIANTDB_TABLE, BInfo),
 					{ok, DBInfo1};
-				Error ->
-					{Error, DBInfo}
-			end
+				Error -> {Error, DBInfo}
+			end;
+		_ -> 
+			Resp = {error, duplicated},
+			{Resp, DBInfo}						   
 	end,
 	{reply, Reply, State#state{db_info=DBInfo2}};
 
 handle_call({drop_bucket, Bucket}, _From, State=#state{db_info=DBInfo}) ->
-	{Reply, DBInfo2} = case exists(Bucket, DBInfo) of
-		false -> 
-			Resp = {error, bucket_not_exists},
-			{Resp, DBInfo};
-		true ->
-			case find_bucket(Bucket) of
-				no_bucket -> ok;
-				BInfo ->
-					gdb_bucket_lib:close_bucket(BInfo),
-					ets:delete(?GIANTDB_TABLE, Bucket)
-			end,
+	{Reply, DBInfo2} = case find_bucket(Bucket) of
+		no_bucket -> 
+			Resp = {error, no_bucket},
+			{Resp, DBInfo};					
+		BInfo ->
+			gdb_bucket_lib:close_bucket(BInfo),
+			ets:delete(?GIANTDB_TABLE, Bucket),
 			case gdb_db_lib:delete_bucket(DBInfo, Bucket) of
-				{ok, DBInfo1} ->
-					{ok, DBInfo1};
-				Error ->
-					{Error, DBInfo}
-			end
+				{ok, DBInfo1} -> {ok, DBInfo1};
+				Error -> {Error, DBInfo}
+			end					
 	end,
 	{reply, Reply, State#state{db_info=DBInfo2}}.
 
@@ -255,13 +300,6 @@ close_buckets() ->
 	lists:foreach(fun(BInfo) ->
 				gdb_bucket_lib:close_bucket(BInfo)
 		end, List).
-
-exists(Bucket, #db_info{db_config=Config}) ->
-	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, Config),
-	case lists:keyfind(Bucket, 1, BucketList) of
-		false -> false;
-		_ -> true
-	end.
 
 find_bucket(Bucket) ->
 	case ets:lookup(?GIANTDB_TABLE, Bucket) of

@@ -31,7 +31,7 @@
 
 -export([add_bucket/2, delete_bucket/2]).
 
--export([add_index/5]).
+-export([add_index/5, remove_index/3]).
 
 -spec exists_db(DBDir :: string()) -> boolean() | {error, Reason :: any()}.
 exists_db(DBDir) ->
@@ -112,13 +112,13 @@ add_index(DBInfo, BInfo, Index, Module, Function) ->
 	Bucket = BInfo#bucket_info.bucket,
 	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
 	case lists:keyfind(Bucket, 1, BucketList) of
-		?BUCKET_ROW(_, BucketDirName, BucketConfig) ->
-			case lists:keyfind(Index, 1, BucketConfig) of
+		?BUCKET_ROW(_, BucketDirName, IndexList) ->
+			case lists:keyfind(Index, 1, IndexList) of
 				false ->
-					BucketConfig1 = lists:keystore(Index, 1, BucketConfig, ?INDEX_ROW(Index, Module, Function)),
-					BucketList1 = lists:keystore(Bucket, 1, BucketList, ?BUCKET_ROW(Bucket, BucketDirName, BucketConfig1)),
+					IndexList1 = lists:keystore(Index, 1, IndexList, ?INDEX_ROW(Index, Module, Function)),
+					BucketList1 = lists:keystore(Bucket, 1, BucketList, ?BUCKET_ROW(Bucket, BucketDirName, IndexList1)),
 					DBConfig1 = lists:keystore(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config, {?DB_CONFIG_BUCKETS_PARAM, BucketList1}),
-					case gdb_bucket_lib:run_index(BInfo, Index, Module, Function) of
+					case gdb_bucket_lib:make_index(BInfo, Index, Module, Function) of
 						{ok, BInfo1} ->
 							store_db_config(DBInfo#db_info.config_file, DBConfig1),
 							{ok, BInfo1, DBInfo#db_info{db_config=DBConfig1}};		
@@ -128,6 +128,29 @@ add_index(DBInfo, BInfo, Index, Module, Function) ->
 			end;
 		false -> {error, bucket_not_found}
 	end.
+
+-spec remove_index(DBInfo :: #db_info{}, BInfo :: #bucket_info{}, Index :: atom()) -> 
+	{ok, BInfo1 :: #bucket_info{}, DBInfo1 :: #db_info{}} | {error, Reason :: any()}.
+remove_index(DBInfo, BInfo, Index) ->
+	Bucket = BInfo#bucket_info.bucket,
+	{_, BucketList} = lists:keyfind(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config),
+	case lists:keyfind(Bucket, 1, BucketList) of
+		?BUCKET_ROW(_, BucketDirName, IndexList) ->
+			case lists:keyfind(Index, 1, IndexList) of
+				false -> {error, index_not_found};
+				_ -> 
+					IndexList1 = lists:keydelete(Index, 1, IndexList),
+					BucketList1 = lists:keystore(Bucket, 1, BucketList, ?BUCKET_ROW(Bucket, BucketDirName, IndexList1)),
+					DBConfig1 = lists:keystore(?DB_CONFIG_BUCKETS_PARAM, 1, DBInfo#db_info.db_config, {?DB_CONFIG_BUCKETS_PARAM, BucketList1}),
+					case gdb_bucket_lib:remove_index(BInfo, Index) of
+						{ok, BInfo1} ->
+							store_db_config(DBInfo#db_info.config_file, DBConfig1),
+							{ok, BInfo1, DBInfo#db_info{db_config=DBConfig1}};		
+						Error -> Error
+					end
+			end;
+		false -> {error, bucket_not_found}
+	end.	
 
 %% ====================================================================
 %% Internal functions
