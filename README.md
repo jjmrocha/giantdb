@@ -33,7 +33,7 @@ Set the property "giantdb_dir" on your config file to define the localization of
 Starting giantDB
 ----------------
 
-If the Giant DB database is created or opened automatically when the application starts.
+Giant DB database is created or opened automatically when the application starts.
 
 
 ```erlang
